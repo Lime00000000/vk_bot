@@ -1,14 +1,15 @@
 import vk_api
 from vk_api.longpoll import VkEventType, VkLongPoll
 import sqlite3
-import hashlib
-from PIL import Image
-import requests
-from io import BytesIO
+import time
 
 
 session = vk_api.VkApi(token=TOKEN)  # сюда токен бота(сообщества)
 vk = session.get_api()
+
+
+class download_img(Exception):
+    pass
 
 
 def send_message(user_id, message):
@@ -43,16 +44,20 @@ def get_images_from_group(user_id, group_id, token):
                 if attachment['type'] == 'photo':
                     photo = attachment['photo']
                     max_size_url = max(photo['sizes'], key=lambda size: size['width'])['url']
-                    response = requests.get(max_size_url)
-                    hash_img = hashlib.md5(Image.open(BytesIO(response.content)).tobytes()).hexdigest()  # из-за этого оно работает по 2 минуты
+                    hash_img = photo['id']
                     if hash_img in hash_set:
                         continue
                     hash_set.add(hash_img)
                     images.append(max_size_url)
-        dbInsert(user_id, group_id, images)
+        if images != []:
+            dbInsert(user_id, group_id, images)
+        else:
+            raise download_img("Вы уже всё загрузили")
         return 'Изображения загружены!'
+    except download_img as e:
+        return e
     except Exception as e:
-        return "Произошла ошибка"
+        return e
 
 
 def hash_from_db():
@@ -79,9 +84,13 @@ if __name__ == '__main__':
     hash_set = hash_from_db()
     for event in VkLongPoll(session).listen():
         if event.type == VkEventType.MESSAGE_NEW and event.to_me:
+            time_start = time.perf_counter()  #
             text = event.text
             user_id = event.user_id
             group_id = text.split('/')[-1]
             access_token = TOKEN  # сюда токен для запроса https://vkhost.github.io я брал отсюда
             send_message(user_id, get_images_from_group(user_id, group_id, access_token))
+            time_end = time.perf_counter()  #
+            time_duration = time_end - time_start  #
+            print(time_duration)
             # при завершении он должен hash_to_db, но я не нашел как это по-человечески сделать
